@@ -1,0 +1,9 @@
+[submodule "vendor/cmsis_device_f4"]
+	path = vendor/cmsis_device_f4
+	url = https://github.com/STMicroelectronics/cmsis_device_f4
+[submodule "vendor/CMSIS_6"]
+	path = vendor/CMSIS_6
+	url = https://github.com/ARM-software/CMSIS_6
+[submodule "vendor/STM32CubeF4"]
+	path = vendor/STM32CubeF4
+	url = https://github.com/STMicroelectronics/STM32CubeF4
