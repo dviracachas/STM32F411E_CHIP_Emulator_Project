@@ -31,14 +31,18 @@ int main(void)
     GPIOD->MODER &= ~(3U << (LED_PIN * 2));     // Clear LED bits to 00
     GPIOD->MODER |=  (1U << (LED_PIN * 2));     // Set LED bits to 01
 
+    // Make the LED turn on at edge
+    uint32_t btn_prev_state = 0;
     while (1) {
         // Make the LED turn on for a fixed time upon a button press
         // IDR: Input data register that holds the level of the input pin
-        if (GPIOA->IDR & (1U << BTN_PIN)) {
+        uint32_t btn_curr_state = GPIOA->IDR & (1U << BTN_PIN);
+        if (btn_curr_state && !btn_prev_state) {
             // ODR: Output data register that holds the level of the output pin
             GPIOD->ODR |= (1U << LED_PIN);       // Set the value of the LED_PIN
             delay(2000000);                      // Delay function to adjust time
             GPIOD->ODR &= ~(1U << LED_PIN);      // Clear the value of the LED_PIN        
         }
+        btn_prev_state = btn_curr_state;         // Update for loop
     }
 }
