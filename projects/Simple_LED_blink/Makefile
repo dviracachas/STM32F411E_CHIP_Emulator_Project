@@ -15,7 +15,12 @@ LDFLAGS = $(CPU) -T$(TOP_DIR)/linker/STM32F411VETX_FLASH.ld -Wl,-Map=$(TARGET).m
 
 SRCS = src/main.c $(TOP_DIR)/vendor/cmsis_device_f4/Source/Templates/system_stm32f4xx.c
 ASMS = $(TOP_DIR)/vendor/cmsis_device_f4/Source/Templates/gcc/startup_stm32f411xe.s
-OBJS = $(SRCS:%.c=build/%.o) $(ASMS:%.s=build/%.o)
+# Maps TOP_DIR to vendor/ so that it builds on build/vendor and build/src
+OBJS_C = $(patsubst $(TOP_DIR)/%, build/%, $(filter $(TOP_DIR)/%, $(SRCS))) \
+         $(patsubst %, build/%, $(filter-out $(TOP_DIR)/%, $(SRCS)))
+OBJS_S = $(patsubst $(TOP_DIR)/%, build/%, $(filter $(TOP_DIR)/%, $(ASMS))) \
+         $(patsubst %, build/%, $(filter-out $(TOP_DIR)/%, $(ASMS)))
+OBJS = $(OBJS_C:.c=.o) $(OBJS_S:.s=.o)
 
 all: $(TARGET).bin
 	$(SIZE) $(TARGET).elf
@@ -26,11 +31,21 @@ $(TARGET).elf: $(OBJS)
 $(TARGET).bin: $(TARGET).elf
 	$(OBJCOPY) -O binary $< $@
 
-build/%.o: %.c
+# Rule for compiling from external sources (vendor/...)
+build/vendor/%.o: $(TOP_DIR)/vendor/%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-build/%.o: %.s
+build/vendor/%.o: $(TOP_DIR)/vendor/%.s
+	@mkdir -p $(dir $@)
+	$(CC) $(ASFLAGS) -c $< -o $@
+
+# Rule for compiling from local sources (src/...)
+build/src/%.o: src/%.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+build/src/%.o: src/%.s
 	@mkdir -p $(dir $@)
 	$(CC) $(ASFLAGS) -c $< -o $@
 
