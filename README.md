@@ -5,6 +5,9 @@
 
 For-fun project to learn how to use the STM32F411E-Discovery board by making a CHIP-8 emulator, using CMSIS and direct compilation only.
 
+# 🗺️ Roadmap
+Current tasks and progress are reported in the related [GitHub Project](https://github.com/users/dviracachas/projects/3).
+
 # 📁 Organization
 
 This repo is organized as a monorepo that will include various projects sharing base libraries located in `vendor/` as submodules.
