@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include "stm32f4xx.h"
 
 #define UART_TX_PIN 2  //PA2
@@ -36,6 +37,8 @@ static void uart_init(void)
     // Set baudrate and enable USART
     USART2->BRR = PCLK1_HZ/BAUD;                    // 115200 Bauds
     USART2->CR1 |= USART_CR1_UE | USART_CR1_TE;     // Enable USART and Tx
+
+    setvbuf(stdout, NULL, _IONBF, 0); // No buffering
 }
 
 // Send byte
@@ -48,12 +51,22 @@ void uart_putc(char c)
 // Send string
 void uart_puts(const char *s) { while (*s) uart_putc(*s++); }
 
+// Implement write to print in UART using printf
+int _write(int fd, char *buf, int len)
+{
+    for (int i = 0; i < len; i++) {
+        if (buf[i] == '\n') uart_putc('\r');
+        uart_putc(buf[i]);
+    }
+    return len;
+}
+
 // Main loop
 int main(void)
 {
     uart_init();
     while (1) {
-        uart_puts("UART working!");
+        printf("UART working!\n");
         for (volatile uint32_t i = 0; i < 500000; i++) { }
     }
 }
