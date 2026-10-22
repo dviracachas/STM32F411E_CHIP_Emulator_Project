@@ -2,12 +2,24 @@ name: Build
 
 on:
   push:
+    branches: [main]
+    paths:
+      - 'projects/**'
+      - 'vendor/**'
+      - '.github/workflows/**'
+      - '.clang-format'
+      - 'Makefile'
   pull_request:
+    paths:
+      - 'projects/**'
+      - 'vendor/**'
+      - '.github/workflows/**'
+      - '.clang-format'
+      - 'Makefile'
 
 jobs:
   firmware:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -17,9 +29,18 @@ jobs:
         with:
           submodules: recursive
       - name: Install ARM toolchain
+        timeout-minutes: 10
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi binutils-arm-none-eabi make
+          for i in 1 2 3; do
+            if timeout 180 bash -c 'sudo apt-get update -o Acquire::Retries=3 \
+                && sudo apt-get install -y -o Acquire::Retries=3 -o DPkg::Lock::Timeout=60 \
+                  gcc-arm-none-eabi libnewlib-arm-none-eabi binutils-arm-none-eabi make'; then
+              exit 0
+            fi
+            echo "apt attempt $i failed, retrying..."
+            sleep 15
+          done
+          exit 1
       - name: Build
         run: make -C projects/${{ matrix.project }}
       - uses: actions/upload-artifact@v7
