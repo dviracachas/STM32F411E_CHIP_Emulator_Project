@@ -6,30 +6,33 @@ on:
 
 jobs:
   firmware:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [Simple_LED_blink, Simple_button_LED, Simple_UART]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
-
       - name: Install ARM toolchain
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-arm-none-eabi libnewlib-arm-none-eabi binutils-arm-none-eabi make
-
       - name: Build
-        run: make
-
-      - name: Upload firmware
-        uses: actions/upload-artifact@v4
+        run: make -C projects/${{ matrix.project }}
+      - uses: actions/upload-artifact@v7
         with:
-          name: firmware
+          name: ${{ matrix.project }}
           path: |
-            build/firmware.bin
-            build/firmware.elf
+            projects/${{ matrix.project }}/build/*.bin
+            projects/${{ matrix.project }}/build/*.elf
+          if-no-files-found: error
 
   format:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: Check formatting

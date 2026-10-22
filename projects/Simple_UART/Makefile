@@ -1,5 +1,5 @@
 TOP_DIR := ../..
-TARGET  = build/firmware
+TARGET  = build/$(notdir $(CURDIR))
 CC      = arm-none-eabi-gcc
 OBJCOPY = arm-none-eabi-objcopy
 SIZE    = arm-none-eabi-size
