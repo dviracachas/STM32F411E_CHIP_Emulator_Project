@@ -1,0 +1,5 @@
+   {
+     "clangd.arguments": ["--query-driver=/usr/bin/arm-none-eabi-gcc", "--background-index"],
+     "editor.formatOnSave": true,
+     "[c]": { "editor.defaultFormatter": "llvm-vs-code-extensions.vscode-clangd" }
+   }

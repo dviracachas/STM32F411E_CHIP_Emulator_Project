@@ -4,3 +4,4 @@
 *.hex
 *.d
 build/
+compile_commands.json
