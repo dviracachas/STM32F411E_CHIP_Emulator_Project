@@ -2,6 +2,7 @@
 
 [![Board](https://img.shields.io/badge/Board-STM32F411--DISCO-blue)](#)
 [![Toolchain](https://img.shields.io/badge/Toolchain-arm--none--eabi--gcc-orange)](#)
+[![Build](https://github.com/dviracachas/STM32F411E_CHIP_Emulator_Project/actions/workflows/build.yaml/badge.svg)](https://github.com/dviracachas/STM32F411E_CHIP_Emulator_Project/actions/workflows/build.yaml)
 
 For-fun project to learn how to use the STM32F411E-Discovery board by making a CHIP-8 emulator, using CMSIS and direct compilation only.
 
