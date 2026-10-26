@@ -5,3 +5,4 @@
 *.d
 build/
 compile_commands.json
+roms/

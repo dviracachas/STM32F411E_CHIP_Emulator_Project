@@ -123,6 +123,123 @@ static void test_set_key_out_of_range_ignored(void)
     }
 }
 
+static void put_op(Chip8 *c, uint16_t op)
+{
+    c->memory[c->pc] = (uint8_t)(op >> 8);
+    c->memory[c->pc + 1] = (uint8_t)(op & 0xFF);
+}
+
+static void test_op_00E0(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    memset(c.display, 1, sizeof c.display);
+    put_op(&c, 0x00E0);
+    assert(chip8_step(&c) == CHIP8_OK);
+    for (size_t i = 0; i < sizeof(c.display); i++) {
+        assert(c.display[i] == false);
+    }
+    assert(c.pc == CHIP8_PROG_START + 2);
+}
+
+static void test_op_1nnn(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    put_op(&c, 0x1D08);
+    assert(chip8_step(&c) == CHIP8_OK);
+    assert(c.pc == 0xD08);
+}
+
+static void test_op_6xnn(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    put_op(&c, 0x6D08);
+    assert(chip8_step(&c) == CHIP8_OK);
+    assert(c.v[0xD] == 0x08);
+    assert(c.pc == CHIP8_PROG_START + 2);
+}
+
+static void test_op_7xnn(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    put_op(&c, 0x7DFF);
+    assert(chip8_step(&c) == CHIP8_OK);
+    assert(c.v[0xD] == 0xFF);
+    assert(c.pc == CHIP8_PROG_START + 2);
+    put_op(&c, 0x7D02);
+    assert(chip8_step(&c) == CHIP8_OK);
+    assert(c.v[0xD] == 0x01);
+    assert(c.v[0xC] == 0x00);
+    assert(c.pc == CHIP8_PROG_START + 4);
+}
+
+static void test_op_annn(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    put_op(&c, 0xAD08);
+    assert(chip8_step(&c) == CHIP8_OK);
+    assert(c.i == 0xD08);
+    assert(c.pc == CHIP8_PROG_START + 2);
+}
+
+static void test_op_dxyn_draws_digit_zero(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    c.i = CHIP8_FONT_START; // Use the zero from font
+    c.v[0] = 0;
+    c.v[1] = 0;
+    put_op(&c, 0xD015);
+    assert(chip8_step(&c) == CHIP8_OK);
+    assert(c.display[0] && c.display[1] && c.display[2] && c.display[3]);
+    assert(!c.display[4] && !c.display[7]);
+    assert(c.display[64 + 0] && !c.display[64 + 1] && !c.display[64 + 2] && c.display[64 + 3]);
+    assert(c.display[4 * 64 + 0] && c.display[4 * 64 + 3]);
+    for (int x = 0; x < 8; x++) {
+        assert(!c.display[5 * 64 + x]);
+    }
+    assert(c.v[0xF] == 0); /* no collision on a blank screen */
+    assert(c.pc == CHIP8_PROG_START + 2);
+}
+
+static void test_op_dxyn_xor_erases_and_sets_collision(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    c.i = CHIP8_FONT_START;
+    put_op(&c, 0xD015);
+    assert(chip8_step(&c) == CHIP8_OK);
+    c.pc = CHIP8_PROG_START;
+    assert(chip8_step(&c) == CHIP8_OK);
+    for (size_t n = 0; n < sizeof c.display; n++) {
+        assert(c.display[n] == 0);
+    }
+    assert(c.v[0xF] == 1);
+}
+
+static void test_op_dxyn_vf_reset_when_no_collision(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    c.i = CHIP8_FONT_START;
+    c.v[0xF] = 1;
+    put_op(&c, 0xD015);
+    assert(chip8_step(&c) == CHIP8_OK);
+    assert(c.v[0xF] == 0);
+}
+
+static void test_op_unknown(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    put_op(&c, 0x8000);
+    assert(chip8_step(&c) == CHIP8_ERR_BAD_OPCODE);
+}
+
 int main(void)
 {
     test_init_state();
@@ -133,6 +250,16 @@ int main(void)
     test_load_rom_empty();
     test_set_key();
     test_set_key_out_of_range_ignored();
+
+    test_op_00E0();
+    test_op_1nnn();
+    test_op_6xnn();
+    test_op_7xnn();
+    test_op_annn();
+    test_op_dxyn_draws_digit_zero();
+    test_op_dxyn_xor_erases_and_sets_collision();
+    test_op_dxyn_vf_reset_when_no_collision();
+    test_op_unknown();
 
     puts("Success. All tests passed!");
     return 0;

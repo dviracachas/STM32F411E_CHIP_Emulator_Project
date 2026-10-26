@@ -17,7 +17,7 @@ static int load_file(const char *path, uint8_t *buf, size_t cap, size_t *out_len
 }
 
 // Draw a border and a diagonal to check the display path
-static void test_pattern(Chip8 *c)
+/* static void test_pattern(Chip8 *c)
 {
     for (unsigned x = 0; x < CHIP8_DISP_W; x++) {
         c->display[x] = 1;                                     // Top
@@ -28,7 +28,7 @@ static void test_pattern(Chip8 *c)
         c->display[(CHIP8_DISP_W - 1) + y * CHIP8_DISP_W] = 1; // Right
         c->display[y + y * CHIP8_DISP_W] = 1;                  // Diagonal
     }
-}
+} */
 
 static void draw(SDL_Renderer *ren, const Chip8 *c)
 {
@@ -64,7 +64,7 @@ int main(int argc, char **argv)
         }
     }
 
-    test_pattern(&chip);
+    // test_pattern(&chip);
 
     if (SDL_Init(SDL_INIT_VIDEO) != 0) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
@@ -90,6 +90,14 @@ int main(int argc, char **argv)
             if (e.type == SDL_QUIT || (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE)) {
                 fprintf(stderr, "quitting because of this event\n");
                 running = false;
+            }
+        }
+        for (int k = 0; k < 10; k++) {
+            Chip8Status s = chip8_step(&chip);
+            if (s != CHIP8_OK) {
+                fprintf(stderr, "stopped at pc=0x%03X, status %d\n", chip.pc, s);
+                running = false;
+                break;
             }
         }
         draw(ren, &chip);
