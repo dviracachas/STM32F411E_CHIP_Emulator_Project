@@ -84,16 +84,9 @@ int main(int argc, char **argv)
     }
 
     bool running = true;
-    static unsigned frames;
     while (running) {
-        if (++frames % 60 == 0)
-            fprintf(stderr, "frame %u\n", frames);
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
-            fprintf(stderr, "event type: 0x%x\n", e.type);
-            if (e.type == SDL_WINDOWEVENT) {
-                fprintf(stderr, "window event subtype: %d\n", e.window.event);
-            }
             if (e.type == SDL_QUIT || (e.type == SDL_KEYDOWN && e.key.keysym.sym == SDLK_ESCAPE)) {
                 fprintf(stderr, "quitting because of this event\n");
                 running = false;
@@ -101,11 +94,10 @@ int main(int argc, char **argv)
         }
         draw(ren, &chip);
         SDL_Delay(16); // Approx 60 FPS
-
-        SDL_DestroyRenderer(ren);
-        SDL_DestroyWindow(win);
-        SDL_Quit();
-        return 0;
     }
+    SDL_DestroyRenderer(ren);
+    SDL_DestroyWindow(win);
+    SDL_Quit();
     fprintf(stderr, "Main loop exited\n");
+    return 0;
 }
