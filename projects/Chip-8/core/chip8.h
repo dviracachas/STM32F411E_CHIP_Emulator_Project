@@ -22,12 +22,20 @@ typedef struct {
     uint8_t sound_timer;
     uint8_t display[CHIP8_DISP_W * CHIP8_DISP_H]; // 0 or 1 per pixel
     bool keys[16];
+    uint32_t rng_state; // Used for random values
 } Chip8;
 
-typedef enum { CHIP8_OK = 0, CHIP8_ERR_TOO_BIG, CHIP8_ERR_BAD_OPCODE } Chip8Status;
+typedef enum {
+    CHIP8_OK = 0,
+    CHIP8_ERR_TOO_BIG,
+    CHIP8_ERR_BAD_OPCODE,
+    CHIP8_ERR_STACK,
+    CHIP8_ERR_MEMORY
+} Chip8Status;
 
 void chip8_init(Chip8 *c); // Reset everything, load font
 void chip8_set_key(Chip8 *c, uint8_t key, bool pressed);
+
 Chip8Status chip8_load_rom(Chip8 *c, const uint8_t *data, size_t len);
 Chip8Status chip8_step(Chip8 *c); // Run an op (CHIP-8 instruction)
 

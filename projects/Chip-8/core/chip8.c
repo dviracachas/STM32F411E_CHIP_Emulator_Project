@@ -26,6 +26,7 @@ void chip8_init(Chip8 *c)
     memset(c, 0, sizeof *c);                                 // Fill with 0
     c->pc = CHIP8_PROG_START;                                // Program counter to start
     memcpy(&c->memory[CHIP8_FONT_START], font, sizeof font); // Copy font to memory
+    c->rng_state = 0xDD7B6B3F;                               // Initialize random state
 }
 
 Chip8Status chip8_load_rom(Chip8 *c, const uint8_t *data, size_t len)
@@ -42,6 +43,16 @@ void chip8_set_key(Chip8 *c, uint8_t key, bool pressed)
     if (key >= 16)
         return;
     c->keys[key] = pressed;
+}
+
+static uint8_t next_random(Chip8 *c)
+{
+    uint32_t s = c->rng_state;
+    s ^= s << 13;
+    s ^= s >> 17;
+    s ^= s << 5;
+    c->rng_state = s;
+    return (uint8_t)(s >> 8);
 }
 
 Chip8Status chip8_step(Chip8 *c)
@@ -65,30 +76,135 @@ Chip8Status chip8_step(Chip8 *c)
     // Select instruction's family
     switch (op >> 12) {
     case 0x0:
-        if (op == 0x00E0) {
-            // Clear display
+        switch (op) {
+        case 0x00E0:
+            // 00E0: Clear display
             memset(c->display, 0, sizeof(c->display));
-        } else {
+            break;
+        case 0x00EE:
+            // 00EE: Pop the stack into pc
+            if (c->sp == 0) {
+                return CHIP8_ERR_STACK;
+            }
+            c->sp--;
+            c->pc = c->stack[c->sp];
+            break;
+        default:
             return CHIP8_ERR_BAD_OPCODE;
         }
         break;
     case 0x1:
-        // Jump to address of last op 12-bits
+        // 1NNN: Jump to address of last op 12-bits
         c->pc = nnn;
         break;
+    case 0x2:
+        // 2NNN: Push pc into stack
+        if (c->sp == 16) {
+            return CHIP8_ERR_STACK;
+        }
+        c->stack[c->sp] = c->pc;
+        c->sp++;
+        c->pc = nnn;
+        break;
+    case 0x3:
+        // 3XNN: Skip when v[x] == nn
+        if (c->v[x] == nn)
+            c->pc += 2;
+        break;
+    case 0x4:
+        // 4XNN: Skip when v[x] != nn
+        if (c->v[x] != nn)
+            c->pc += 2;
+        break;
+    case 0x5:
+        if (n == 0) {
+            // 5XY0: Skip when v[x] == v[y]
+            if (c->v[x] == c->v[y])
+                c->pc += 2;
+        } else {
+            return CHIP8_ERR_BAD_OPCODE;
+        }
+        break;
     case 0x6:
-        // Set register X to last op byte
+        // 6XNN: Set register X to last op byte
         c->v[x] = nn;
         break;
     case 0x7:
-        // Add last op byte to register X (wraps at 256)
+        // 7XNN: Add last op byte to register X (wraps at 256)
         c->v[x] += nn;
         break;
+    case 0x8:
+        switch (n) {
+        case 0x0: // 8XY0
+            c->v[x] = c->v[y];
+            break;
+        case 0x1: // 8XY1
+            c->v[x] |= c->v[y];
+            break;
+        case 0x2: // 8XY2
+            c->v[x] &= c->v[y];
+            break;
+        case 0x3: // 8XY3
+            c->v[x] ^= c->v[y];
+            break;
+        case 0x4: { // 8XY4
+            uint16_t sum = c->v[x] + c->v[y];
+            uint8_t overflow = (sum > 0xFF);
+            c->v[x] = (uint8_t)sum;
+            c->v[0xF] = overflow;
+            break;
+        }
+        case 0x5: { // 8XY5
+            uint8_t no_borrow = (c->v[x] >= c->v[y]);
+            c->v[x] -= c->v[y];
+            c->v[0xF] = no_borrow;
+            break;
+        }
+        case 0x6: { // 8XY6
+            bool moved_bit = c->v[x] & 0x1;
+            c->v[x] = c->v[x] >> 1;
+            c->v[0xF] = moved_bit;
+            break;
+        }
+        case 0x7: { // 8XY7
+            uint8_t no_borrow = (c->v[y] >= c->v[x]);
+            c->v[x] = c->v[y] - c->v[x];
+            c->v[0xF] = no_borrow;
+            break;
+        }
+        case 0xE: { // 8XYE
+            bool moved_bit = c->v[x] & 0x80;
+            c->v[x] = c->v[x] << 1;
+            c->v[0xF] = moved_bit;
+            break;
+        }
+        default:
+            return CHIP8_ERR_BAD_OPCODE;
+        }
+        break;
+    case 0x9:
+        if (n == 0) {
+            // 9XY0: Skip when v[x] != v[y]
+            if (c->v[x] != c->v[y])
+                c->pc += 2;
+        } else {
+            return CHIP8_ERR_BAD_OPCODE;
+        }
+        break;
     case 0xA:
-        // Set index to last op 12-bits;
+        // ANNN: Set index to last op 12-bits;
         c->i = nnn;
         break;
+    case 0xB:
+        // BNNN
+        c->pc = nnn + c->v[0];
+        break;
+    case 0xC:
+        // CXNN
+        c->v[x] = next_random(c) & nn;
+        break;
     case 0xD: {
+        // DXYN: Draw a Nx8 sprite at X,Y
         // Wrap coordinates
         uint8_t px = c->v[x] % CHIP8_DISP_W;
         uint8_t py = c->v[y] % CHIP8_DISP_H;
@@ -116,6 +232,50 @@ Chip8Status chip8_step(Chip8 *c)
         }
         break;
     }
+    case 0xF:
+        switch (nn) {
+        case 0x1E:
+            // FX1E
+            if (c->i + c->v[x] >= CHIP8_MEM_SIZE)
+                return CHIP8_ERR_MEMORY;
+            c->i += c->v[x];
+            break;
+        case 0x29:
+            // FX29
+            c->i = CHIP8_FONT_START + (c->v[x] & 0xF) * 5;
+            break;
+        case 0x33: {
+            // FX33
+            if ((uint16_t)(c->i + 2) >= CHIP8_MEM_SIZE)
+                return CHIP8_ERR_MEMORY;
+            uint8_t hundreds = c->v[x] / 100;
+            uint8_t tens = (c->v[x] / 10) % 10;
+            uint8_t units = c->v[x] % 10;
+            c->memory[c->i] = hundreds;
+            c->memory[c->i + 1] = tens;
+            c->memory[c->i + 2] = units;
+            break;
+        }
+        case 0x55:
+            // FX55
+            if (c->i + x >= CHIP8_MEM_SIZE)
+                return CHIP8_ERR_MEMORY;
+            for (uint8_t idx = 0; idx <= x; idx++) {
+                c->memory[c->i + idx] = c->v[idx];
+            }
+            break;
+        case 0x65:
+            // FX65
+            if (c->i + x >= CHIP8_MEM_SIZE)
+                return CHIP8_ERR_MEMORY;
+            for (uint8_t idx = 0; idx <= x; idx++) {
+                c->v[idx] = c->memory[c->i + idx];
+            }
+            break;
+        default:
+            return CHIP8_ERR_BAD_OPCODE;
+        }
+        break;
     default:
         // Unknown instruction
         return CHIP8_ERR_BAD_OPCODE;
