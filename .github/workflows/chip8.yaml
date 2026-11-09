@@ -37,18 +37,13 @@ jobs:
           exit 1
 
       - name: Unit tests (Core & Opcodes)
-        run: make -C projects/chip8 test
+        run: make -C projects/Chip-8 test
 
       - name: Build SDL frontend
-        run: make -C projects/chip8 build/chip8
+        run: make -C projects/Chip-8 build/Chip-8
 
       - name: Static analysis
         run: |
-          cppcheck --error-exitcode=1 --enable=warning,portability \
-            --inline-suppr --suppress=missingIncludeSystem --quiet \
-            -Iprojects/chip8/core \
-            projects/chip8/core projects/chip8/platform_sdl projects/chip8/tests
-            
           cppcheck --error-exitcode=1 --enable=warning,portability \
             --inline-suppr --suppress=missingIncludeSystem --quiet \
             -Iprojects/Chip-8/core \
