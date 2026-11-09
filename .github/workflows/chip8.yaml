@@ -40,7 +40,7 @@ jobs:
         run: make -C projects/Chip-8 test
 
       - name: Build SDL frontend
-        run: make -C projects/Chip-8 build/Chip-8
+        run: make -C projects/Chip-8 build/chip8
 
       - name: Static analysis
         run: |
