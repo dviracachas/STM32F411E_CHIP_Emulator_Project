@@ -578,11 +578,150 @@ static void test_fx55_fx65_bounds(void)
     assert(exec(&c, 0xFF65) == CHIP8_ERR_MEMORY);
 }
 
+static void test_fx07(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    c.delay_timer = 42;
+    assert(exec(&c, 0xF507) == CHIP8_OK);
+    assert(c.v[5] == 42);
+}
+
+static void test_fx15(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    c.v[5] = 99;
+    assert(exec(&c, 0xF515) == CHIP8_OK);
+    assert(c.delay_timer == 99);
+    assert(c.sound_timer == 0);
+}
+
+static void test_fx18(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    c.v[5] = 7;
+    assert(exec(&c, 0xF518) == CHIP8_OK);
+    assert(c.sound_timer == 7);
+    assert(c.delay_timer == 0);
+}
+
+static void test_tick_timers_decrement(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    c.delay_timer = 5;
+    c.sound_timer = 2;
+    chip8_tick_timers(&c);
+    assert(c.delay_timer == 4);
+    assert(c.sound_timer == 1);
+}
+
+static void test_tick_timers_stop_at_zero(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    c.delay_timer = 1;
+    c.sound_timer = 0;
+    chip8_tick_timers(&c);
+    chip8_tick_timers(&c);
+    chip8_tick_timers(&c);
+    assert(c.delay_timer == 0);
+    assert(c.sound_timer == 0);
+}
+
+static void test_ex9e(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    c.v[2] = 5;
+    chip8_set_key(&c, 5, true);
+    assert(exec(&c, 0xE29E) == CHIP8_OK);
+    assert(c.pc == CHIP8_PROG_START + 4);
+
+    chip8_init(&c);
+    c.v[2] = 5;
+    assert(exec(&c, 0xE29E) == CHIP8_OK);
+    assert(c.pc == CHIP8_PROG_START + 2);
+}
+
+static void test_exa1(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    c.v[2] = 5;
+    assert(exec(&c, 0xE2A1) == CHIP8_OK);
+    assert(c.pc == CHIP8_PROG_START + 4);
+
+    chip8_init(&c);
+    c.v[2] = 5;
+    chip8_set_key(&c, 5, true);
+    assert(exec(&c, 0xE2A1) == CHIP8_OK);
+    assert(c.pc == CHIP8_PROG_START + 2);
+}
+
+static void test_ex_key_index_masked(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    c.v[2] = 0xFF;
+    chip8_set_key(&c, 15, true);
+    assert(exec(&c, 0xE29E) == CHIP8_OK);
+    assert(c.pc == CHIP8_PROG_START + 4);
+}
+
+static void test_ex_unknown_subop(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    assert(exec(&c, 0xE2FF) == CHIP8_ERR_BAD_OPCODE);
+}
+
+static void test_fx0a_waits_without_key(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    c.v[3] = 0x55;
+    assert(exec(&c, 0xF30A) == CHIP8_OK);
+    assert(c.pc == CHIP8_PROG_START);
+    assert(c.v[3] == 0x55);
+    assert(chip8_step(&c) == CHIP8_OK);
+    assert(c.pc == CHIP8_PROG_START);
+}
+
+static void test_fx0a_stores_pressed_key(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    put_op(&c, 0xF30A);
+    assert(chip8_step(&c) == CHIP8_OK);
+    assert(c.pc == CHIP8_PROG_START);
+
+    chip8_set_key(&c, 7, true);
+    assert(chip8_step(&c) == CHIP8_OK);
+    assert(c.v[3] == 7);
+    assert(c.pc == CHIP8_PROG_START + 2);
+}
+
 static void test_op_unknown(void)
 {
     Chip8 c;
     chip8_init(&c);
     assert(exec(&c, 0xE000) == CHIP8_ERR_BAD_OPCODE);
+}
+
+static void test_timers_independent_of_steps(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    c.delay_timer = 10;
+    c.v[1] = 0;
+    for (int n = 0; n < 5; n++) {
+        c.pc = CHIP8_PROG_START;
+        assert(exec(&c, 0x7101) == CHIP8_OK);
+    }
+    assert(c.delay_timer == 10);
 }
 
 int main(void)
@@ -629,7 +768,19 @@ int main(void)
     test_fx55_fx65_roundtrip();
     test_fx55_fx65_all_registers();
     test_fx55_fx65_bounds();
+    test_fx07();
+    test_fx15();
+    test_fx18();
+    test_tick_timers_decrement();
+    test_tick_timers_stop_at_zero();
+    test_ex9e();
+    test_exa1();
+    test_ex_key_index_masked();
+    test_ex_unknown_subop();
+    test_fx0a_waits_without_key();
+    test_fx0a_stores_pressed_key();
     test_op_unknown();
+    test_timers_independent_of_steps();
 
     puts("Success. All tests passed!");
     return 0;

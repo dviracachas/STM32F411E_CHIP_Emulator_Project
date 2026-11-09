@@ -35,6 +35,7 @@ typedef enum {
 
 void chip8_init(Chip8 *c); // Reset everything, load font
 void chip8_set_key(Chip8 *c, uint8_t key, bool pressed);
+void chip8_tick_timers(Chip8 *c); // Ticks at 60 Hz
 
 Chip8Status chip8_load_rom(Chip8 *c, const uint8_t *data, size_t len);
 Chip8Status chip8_step(Chip8 *c); // Run an op (CHIP-8 instruction)

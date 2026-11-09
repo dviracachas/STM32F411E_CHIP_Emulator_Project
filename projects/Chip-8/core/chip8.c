@@ -1,4 +1,6 @@
 #include "chip8.h"
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -53,6 +55,16 @@ static uint8_t next_random(Chip8 *c)
     s ^= s << 5;
     c->rng_state = s;
     return (uint8_t)(s >> 8);
+}
+
+void chip8_tick_timers(Chip8 *c)
+{
+    if (c->delay_timer > 0) {
+        c->delay_timer--;
+    }
+    if (c->sound_timer > 0) {
+        c->sound_timer--;
+    }
 }
 
 Chip8Status chip8_step(Chip8 *c)
@@ -232,8 +244,49 @@ Chip8Status chip8_step(Chip8 *c)
         }
         break;
     }
+    case 0xE:
+        switch (nn) {
+        case 0x9E:
+            // EX9E
+            if (c->keys[c->v[x] & 0xF])
+                c->pc += 2;
+            break;
+        case 0xA1:
+            // EXA1
+            if (!c->keys[c->v[x] & 0xF])
+                c->pc += 2;
+            break;
+        default:
+            return CHIP8_ERR_BAD_OPCODE;
+        }
+        break;
     case 0xF:
         switch (nn) {
+        case 0x07:
+            // FX07
+            c->v[x] = c->delay_timer;
+            break;
+        case 0x0A:
+            // FX0A
+            bool key_pressed = false;
+            for (uint8_t idx = 0; idx <= 15; idx++) {
+                if (c->keys[idx]) {
+                    key_pressed = true;
+                    c->v[x] = idx;
+                    break;
+                }
+            }
+            if (!key_pressed)
+                c->pc -= 2;
+            break;
+        case 0x15:
+            // FX15
+            c->delay_timer = c->v[x];
+            break;
+        case 0x18:
+            // FX18
+            c->sound_timer = c->v[x];
+            break;
         case 0x1E:
             // FX1E
             if (c->i + c->v[x] >= CHIP8_MEM_SIZE)
