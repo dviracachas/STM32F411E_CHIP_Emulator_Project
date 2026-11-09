@@ -1,0 +1,56 @@
+name: CHIP-8
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'projects/Chip-8/**'
+      - '.github/workflows/chip8.yaml'
+  pull_request:
+    paths:
+      - 'projects/Chip-8/**'
+      - '.github/workflows/chip8.yaml'
+
+concurrency:
+  group: chip8-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        timeout-minutes: 5
+        run: |
+          for i in 1 2 3; do
+            if timeout 180 bash -c 'sudo apt-get update -o Acquire::Retries=3 \
+                && sudo apt-get install -y --no-install-recommends \
+                   -o Acquire::Retries=3 libsdl2-dev pkg-config cppcheck'; then
+              exit 0
+            fi
+            echo "apt attempt $i failed, retrying..."
+            sleep 15
+          done
+          exit 1
+
+      - name: Unit tests (Core & Opcodes)
+        run: make -C projects/chip8 test
+
+      - name: Build SDL frontend
+        run: make -C projects/chip8 build/chip8
+
+      - name: Static analysis
+        run: |
+          cppcheck --error-exitcode=1 --enable=warning,portability \
+            --inline-suppr --suppress=missingIncludeSystem --quiet \
+            -Iprojects/chip8/core \
+            projects/chip8/core projects/chip8/platform_sdl projects/chip8/tests
+            
+          cppcheck --error-exitcode=1 --enable=warning,portability \
+            --inline-suppr --suppress=missingIncludeSystem --quiet \
+            -Iprojects/Chip-8/core \
+            projects/Chip-8/core projects/Chip-8/platform_sdl projects/Chip-8/tests 
+
