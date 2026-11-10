@@ -23,7 +23,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        project: [Simple_LED_blink, Simple_button_LED, Simple_UART]
+        project: [Simple_LED_blink, Simple_button_LED, Simple_UART, Chip-8-STM32]
     steps:
       - uses: actions/checkout@v7
         with:
