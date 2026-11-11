@@ -21,6 +21,15 @@
 #define DISP_DC_HIGH() (GPIOA->BSRR = (1UL << DISP_DC_PIN))
 #define DISP_DC_LOW() (GPIOA->BSRR = (1UL << (DISP_DC_PIN + 16)))
 
+#define DISP_W 320
+#define DISP_H 240
+#define RGB565(r, g, b) ((uint16_t)((((r) & 0xF8) << 8) | (((g) & 0xFC) << 3) | ((b) >> 3)))
+#define COLOR_RED 0xF800
+#define COLOR_GREEN 0x07E0
+#define COLOR_BLUE 0x001F
+#define COLOR_BLACK 0x0000
+#define COLOR_WHITE 0xFFFF
+
 #define PCLK1_HZ 16000000U
 #define BAUD 115200U
 
@@ -175,7 +184,7 @@ static void spi1_init(void)
     SPI1->CR1 |= SPI_CR1_MSTR;                  // Set as master
     SPI1->CR1 |= SPI_CR1_SSM;                   // Software slave management
     SPI1->CR1 |= SPI_CR1_SSI;                   // Internal slave select (Master mode)
-    SPI1->CR1 |= (3U << SPI_CR1_BR_Pos);        // Set baud rate bits to 11 (Fclk/16)
+    SPI1->CR1 &= ~(7U << SPI_CR1_BR_Pos);       // Set baud rate bits to 000 (Fclk/2)
     SPI1->CR1 &= ~(1U << SPI_CR1_DFF_Pos);      // Set Data frame bit to 0 (8 bits)
     SPI1->CR1 &= ~(1U << SPI_CR1_LSBFIRST_Pos); // Set LSB bit to 0 (Most significant bit first)
 
@@ -225,6 +234,107 @@ static void disp_rst(void)
     delay_ms(120);
 }
 
+typedef struct {
+    uint8_t cmd;
+    uint8_t len; // Number of data bytes
+    uint8_t data[16];
+    uint16_t delay_ms;
+} disp_sequence;
+
+static const disp_sequence init_seq[] = {
+    {0x01, 0, {0}, 120},  // Software reset
+    {0x3A, 1, {0x55}, 0}, // Pixel format (16 bits per pixel)
+    {0x36, 1, {0x28}, 0}, // Memory Access Control
+    {0x11, 0, {0}, 120},  // Sleep Out
+    {0x29, 0, {0}, 0},    // Dispay on
+    {0x00, 0, {0}, 0}     // End of sequence
+};
+
+static void disp_execute_seq(const disp_sequence *seq)
+{
+    for (const disp_sequence *step = seq; step->cmd != 0x00; step++) {
+        disp_cmd(step->cmd);
+        for (uint8_t byte = 0; byte < step->len; byte++) {
+            disp_data(step->data[byte]);
+        }
+        delay_ms(step->delay_ms);
+    }
+}
+
+static void disp_init()
+{
+    disp_execute_seq(init_seq);
+};
+
+void disp_set_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
+{
+    disp_cmd(0x2A);
+    disp_data(x0 >> 8);
+    disp_data(x0 & 0xFF);
+    disp_data(x1 >> 8);
+    disp_data(x1 & 0xFF);
+    disp_cmd(0x2B);
+    disp_data(y0 >> 8);
+    disp_data(y0 & 0xFF);
+    disp_data(y1 >> 8);
+    disp_data(y1 & 0xFF);
+    disp_cmd(0x2C);
+    DISP_DC_HIGH();
+    DISP_CS_LOW();
+};
+
+void disp_fill_rect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color)
+{
+    // Clip rectangle to screen
+    if (x >= DISP_W || x >= DISP_W) {
+        return;
+    }
+    uint16_t x1 = x + w;
+    if (x1 >= DISP_W) {
+        x1 = DISP_W;
+    }
+    uint16_t y1 = y + h;
+    if (y1 >= DISP_H) {
+        y1 = DISP_H;
+    }
+    // Fill window
+    disp_set_window(x, y, x1, y1);
+    for (uint32_t n = 0; n < (uint32_t)w * h; n++) {
+        spi_write(color >> 8);
+        spi_write(color & 0xFF);
+    }
+    spi_wait_idle();
+    DISP_CS_HIGH();
+};
+
+void disp_clear(uint16_t color)
+{
+    disp_fill_rect(0, 0, DISP_W, DISP_H, color);
+};
+
+void disp_draw_pixel(uint16_t x, uint16_t y, uint16_t color)
+{
+    disp_fill_rect(x, y, 1, 1, color);
+};
+
+void disp_selftest()
+{
+    disp_clear(COLOR_BLACK);
+    delay_ms(200);
+    disp_clear(COLOR_RED);
+    delay_ms(200);
+    disp_clear(COLOR_BLUE);
+    delay_ms(200);
+    disp_clear(COLOR_GREEN);
+    delay_ms(200);
+    disp_clear(COLOR_WHITE);
+    delay_ms(200);
+    disp_fill_rect(50, 50, 50, 50, COLOR_RED);
+    disp_fill_rect(200, 50, 50, 50, COLOR_BLUE);
+    disp_fill_rect(50, 150, 50, 50, COLOR_GREEN);
+    disp_fill_rect(200, 150, 50, 50, COLOR_BLACK);
+};
+
 // Main loop
 int main(void)
 {
@@ -239,9 +349,8 @@ int main(void)
     spi1_init();
 
     disp_rst();
-    disp_cmd(0x11);
-    delay_ms(120);
-    disp_cmd(0x29);
+    disp_init();
+    disp_selftest();
 
     uint32_t last_ms = ms_ticks;
     uint32_t cpu_acc = 0;
