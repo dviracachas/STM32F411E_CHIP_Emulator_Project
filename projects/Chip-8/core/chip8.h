@@ -21,6 +21,7 @@ typedef struct {
     uint8_t delay_timer;
     uint8_t sound_timer;
     uint8_t display[CHIP8_DISP_W * CHIP8_DISP_H]; // 0 or 1 per pixel
+    bool display_dirty;
     bool keys[16];
     uint32_t rng_state; // Used for random values
 } Chip8;

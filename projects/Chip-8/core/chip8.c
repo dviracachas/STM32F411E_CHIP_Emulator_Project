@@ -92,6 +92,7 @@ Chip8Status chip8_step(Chip8 *c)
         case 0x00E0:
             // 00E0: Clear display
             memset(c->display, 0, sizeof(c->display));
+            c->display_dirty = true;
             break;
         case 0x00EE:
             // 00EE: Pop the stack into pc
@@ -242,6 +243,7 @@ Chip8Status chip8_step(Chip8 *c)
                 }
             }
         }
+        c->display_dirty = true;
         break;
     }
     case 0xE:

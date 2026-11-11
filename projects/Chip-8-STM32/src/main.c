@@ -21,6 +21,7 @@
 #define DISP_DC_HIGH() (GPIOA->BSRR = (1UL << DISP_DC_PIN))
 #define DISP_DC_LOW() (GPIOA->BSRR = (1UL << (DISP_DC_PIN + 16)))
 
+// Definitions for the screen
 #define DISP_W 320
 #define DISP_H 240
 #define RGB565(r, g, b) ((uint16_t)((((r) & 0xF8) << 8) | (((g) & 0xFC) << 3) | ((b) >> 3)))
@@ -30,6 +31,12 @@
 #define COLOR_BLACK 0x0000
 #define COLOR_WHITE 0xFFFF
 
+#define SCALE 5
+#define OFFSET_Y ((DISP_H - CHIP8_DISP_H * SCALE) / 2)
+#define FG RGB565(0x33, 0xFF, 0x66)
+#define BG COLOR_BLACK
+
+// Definitions for UART
 #define PCLK1_HZ 16000000U
 #define BAUD 115200U
 
@@ -46,6 +53,27 @@ static const uint8_t timer_rom[] = {
     0xA0, 0x91, // 0x20E: I = 0x91 (Font digit D)
     0xD2, 0x35, // 0x210: Draw 5 rows at (V2, V3)
     0x12, 0x12  // 0x212: Jump to itself (Repeat)
+};
+
+static const uint8_t ball_moving_rom[] = {
+    0x60, 0x00, // 0x200: V0 = 0
+    0x61, 0x0A, // 0x202: V1 = 10
+    0xA2, 0x20, /// 0x204: I = 0x220 (Ball sprite)
+    0xD0, 0x18, // 0x206: Draw 8 rows at (V0, V1)
+    0x62, 0x02, // 0x208: V2 = 2
+    0xF2, 0x15, // 0x20A: delay_timer = V2
+    0xF3, 0x07, // 0x20C: V3 = delay_timer
+    0x33, 0x00, // 0x20E: Skip next if V3 == 0
+    0x12, 0x0C, // 0x210: Jump to 20C (Wait for delay)
+    0xD0, 0x18, // 0x212: Erase (Draw again)
+    0x70, 0x01, // 0x214: V0 += 1
+    0x30, 0x40, // 0x216: Skip next if V0 == 64
+    0x12, 0x06, // 0x218: Jump to 206
+    0x60, 0x00, // 0x21A: V0 = 0 (Wrap around)
+    0x12, 0x06, // 0x21C: Jump to 206
+    0x00, 0x00, // 0x21E: Padding
+    // At 0x220
+    0x3C, 0x7E, 0xFF, 0xFF, 0xFF, 0xFF, 0x7E, 0x3C // Ball sprite
 };
 
 volatile uint32_t ms_ticks;
@@ -317,6 +345,30 @@ void disp_draw_pixel(uint16_t x, uint16_t y, uint16_t color)
     disp_fill_rect(x, y, 1, 1, color);
 };
 
+static uint16_t line[CHIP8_DISP_W * SCALE];
+
+void render(const Chip8 *c)
+{
+    disp_set_window(0, OFFSET_Y, DISP_W - 1, OFFSET_Y + CHIP8_DISP_H * SCALE - 1);
+
+    for (unsigned y = 0; y < CHIP8_DISP_H; y++) {
+        for (unsigned x = 0; x < CHIP8_DISP_W; x++) {
+            uint16_t col = c->display[x + y * CHIP8_DISP_W] ? FG : BG;
+            for (unsigned k = 0; k < SCALE; k++) {
+                line[x * SCALE + k] = col;
+            }
+        }
+        for (unsigned r = 0; r < SCALE; r++) {
+            for (unsigned i = 0; i < CHIP8_DISP_W * SCALE; i++) {
+                spi_write(line[i] >> 8);
+                spi_write(line[i] & 0xFF);
+            }
+        }
+    }
+    spi_wait_idle();
+    DISP_CS_HIGH();
+}
+
 void disp_selftest()
 {
     disp_clear(COLOR_BLACK);
@@ -341,7 +393,7 @@ int main(void)
     SysTick_Config(SystemCoreClock / 1000U);
 
     chip8_init(&chip);
-    chip8_load_rom(&chip, timer_rom, sizeof(timer_rom));
+    chip8_load_rom(&chip, ball_moving_rom, sizeof(ball_moving_rom));
 
     uart_init();
     uart_puts("\x1b[2J");
@@ -350,7 +402,8 @@ int main(void)
 
     disp_rst();
     disp_init();
-    disp_selftest();
+    disp_clear(COLOR_BLACK);
+    // disp_selftest();
 
     uint32_t last_ms = ms_ticks;
     uint32_t cpu_acc = 0;
@@ -382,6 +435,13 @@ int main(void)
                 printf("Time elapsed: %lu ms\n", (unsigned long)(ms_ticks - start));
             }
         }
-        print_display(&chip);
+        // print_display(&chip);
+        static uint32_t last_render;
+        if (chip.display_dirty && (uint32_t)(ms_ticks - last_render) >= 33) {
+            last_render = ms_ticks;
+            render(&chip);
+            printf("Time to render: %lu ms\n", (unsigned long)(ms_ticks - last_render));
+            chip.display_dirty = false;
+        }
     }
 }

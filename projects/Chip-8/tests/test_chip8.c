@@ -724,6 +724,100 @@ static void test_timers_independent_of_steps(void)
     assert(c.delay_timer == 10);
 }
 
+static void test_dirty_cleared_on_init(void)
+{
+    Chip8 c;
+    memset(&c, 0xFF, sizeof c);
+    chip8_init(&c);
+    assert(c.display_dirty == false);
+}
+
+static void test_dirty_set_by_00e0(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    assert(exec(&c, 0x00E0) == CHIP8_OK);
+    assert(c.display_dirty == true);
+}
+
+static void test_dirty_set_by_dxyn(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    c.i = CHIP8_FONT_START;
+    assert(exec(&c, 0xD015) == CHIP8_OK);
+    assert(c.display_dirty == true);
+}
+
+static void test_dirty_set_by_dxyn_erase(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    c.i = CHIP8_FONT_START;
+    assert(exec(&c, 0xD015) == CHIP8_OK);
+    c.display_dirty = false;
+    c.pc = CHIP8_PROG_START;
+    assert(exec(&c, 0xD015) == CHIP8_OK);
+    assert(c.display_dirty == true);
+}
+
+static void test_dirty_set_by_dxyn_zero_rows(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    assert(exec(&c, 0xD010) == CHIP8_OK);
+    assert(c.display_dirty == true);
+}
+
+static void test_dirty_stays_until_cleared(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    assert(exec(&c, 0x00E0) == CHIP8_OK);
+    c.pc = CHIP8_PROG_START;
+    assert(exec(&c, 0x6A01) == CHIP8_OK);
+    assert(c.display_dirty == true);
+}
+
+static void test_dirty_not_set_by_other_opcodes(void)
+{
+    static const uint16_t ops[] = {0x6A05, 0x7A01, 0xA123, 0x1300, 0x3A00, 0x8120,
+                                   0xC1FF, 0xF11E, 0xF107, 0xF115, 0xF118};
+    for (size_t n = 0; n < sizeof ops / sizeof ops[0]; n++) {
+        Chip8 c;
+        chip8_init(&c);
+        assert(exec(&c, ops[n]) == CHIP8_OK);
+        assert(c.display_dirty == false);
+    }
+}
+
+static void test_dirty_not_set_by_keys_or_timers(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    chip8_set_key(&c, 3, true);
+    chip8_tick_timers(&c);
+    assert(c.display_dirty == false);
+}
+
+static void test_dirty_not_cleared_by_step_or_tick(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    c.display_dirty = true;
+    assert(exec(&c, 0x6A01) == CHIP8_OK);
+    chip8_tick_timers(&c);
+    assert(c.display_dirty == true);
+}
+
+static void test_dirty_not_set_on_failed_opcode(void)
+{
+    Chip8 c;
+    chip8_init(&c);
+    assert(exec(&c, 0x0123) == CHIP8_ERR_BAD_OPCODE);
+    assert(c.display_dirty == false);
+}
+
 int main(void)
 {
     test_init_state();
@@ -781,6 +875,17 @@ int main(void)
     test_fx0a_stores_pressed_key();
     test_op_unknown();
     test_timers_independent_of_steps();
+
+    test_dirty_cleared_on_init();
+    test_dirty_set_by_00e0();
+    test_dirty_set_by_dxyn();
+    test_dirty_set_by_dxyn_erase();
+    test_dirty_set_by_dxyn_zero_rows();
+    test_dirty_stays_until_cleared();
+    test_dirty_not_set_by_other_opcodes();
+    test_dirty_not_set_by_keys_or_timers();
+    test_dirty_not_cleared_by_step_or_tick();
+    test_dirty_not_set_on_failed_opcode();
 
     puts("Success. All tests passed!");
     return 0;
