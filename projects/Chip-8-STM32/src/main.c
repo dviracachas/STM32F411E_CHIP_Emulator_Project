@@ -37,7 +37,7 @@
 #define BG COLOR_BLACK
 
 // Definitions for UART
-#define PCLK1_HZ 16000000U
+#define PCLK1_HZ 50000000U
 #define BAUD 115200U
 
 static Chip8 chip;
@@ -75,6 +75,40 @@ static const uint8_t ball_moving_rom[] = {
     // At 0x220
     0x3C, 0x7E, 0xFF, 0xFF, 0xFF, 0xFF, 0x7E, 0x3C // Ball sprite
 };
+
+static int clock_init_100mhz(void)
+{
+    RCC->APB1ENR |= RCC_APB1ENR_PWREN;
+    (void)RCC->APB1ENR;
+    PWR->CR |= PWR_CR_VOS;
+
+    FLASH->ACR = FLASH_ACR_LATENCY_3WS | FLASH_ACR_PRFTEN | FLASH_ACR_ICEN | FLASH_ACR_DCEN;
+    if ((FLASH->ACR & FLASH_ACR_LATENCY) != FLASH_ACR_LATENCY_3WS)
+        return -1;
+
+    RCC->CFGR = (RCC->CFGR & ~(RCC_CFGR_HPRE | RCC_CFGR_PPRE1 | RCC_CFGR_PPRE2)) |
+                RCC_CFGR_HPRE_DIV1 | RCC_CFGR_PPRE1_DIV2 | RCC_CFGR_PPRE2_DIV1;
+
+    uint32_t p = RCC->PLLCFGR;
+    p &= ~(RCC_PLLCFGR_PLLM | RCC_PLLCFGR_PLLN | RCC_PLLCFGR_PLLP | RCC_PLLCFGR_PLLQ |
+           RCC_PLLCFGR_PLLSRC);
+    p |= (8U << RCC_PLLCFGR_PLLM_Pos) | (100U << RCC_PLLCFGR_PLLN_Pos) |
+         (0U << RCC_PLLCFGR_PLLP_Pos) | (4U << RCC_PLLCFGR_PLLQ_Pos);
+    RCC->PLLCFGR = p;
+
+    RCC->CR |= RCC_CR_PLLON;
+    for (uint32_t t = 0; !(RCC->CR & RCC_CR_PLLRDY); t++)
+        if (t > 100000U)
+            return -2;
+
+    RCC->CFGR = (RCC->CFGR & ~RCC_CFGR_SW) | RCC_CFGR_SW_PLL;
+    for (uint32_t t = 0; (RCC->CFGR & RCC_CFGR_SWS) != RCC_CFGR_SWS_PLL; t++)
+        if (t > 100000U)
+            return -3;
+
+    SystemCoreClock = 100000000U;
+    return 0;
+}
 
 volatile uint32_t ms_ticks;
 void SysTick_Handler(void)
@@ -212,7 +246,7 @@ static void spi1_init(void)
     SPI1->CR1 |= SPI_CR1_MSTR;                  // Set as master
     SPI1->CR1 |= SPI_CR1_SSM;                   // Software slave management
     SPI1->CR1 |= SPI_CR1_SSI;                   // Internal slave select (Master mode)
-    SPI1->CR1 &= ~(7U << SPI_CR1_BR_Pos);       // Set baud rate bits to 000 (Fclk/2)
+    SPI1->CR1 |= 1U << SPI_CR1_BR_Pos;          // Set baud rate bits to 001 (Fclk/4)
     SPI1->CR1 &= ~(1U << SPI_CR1_DFF_Pos);      // Set Data frame bit to 0 (8 bits)
     SPI1->CR1 &= ~(1U << SPI_CR1_LSBFIRST_Pos); // Set LSB bit to 0 (Most significant bit first)
 
@@ -390,6 +424,8 @@ void disp_selftest()
 // Main loop
 int main(void)
 {
+    clock_init_100mhz();
+
     SysTick_Config(SystemCoreClock / 1000U);
 
     chip8_init(&chip);
