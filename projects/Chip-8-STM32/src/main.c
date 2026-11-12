@@ -94,6 +94,31 @@ static void delay_ms(uint32_t ms)
     }
 }
 
+volatile uint32_t tick60;
+
+void timer60_init(void)
+{
+    RCC->APB1ENR |= RCC_APB1ENR_TIM3EN;
+    (void)RCC->APB1ENR;
+
+    TIM3->PSC = 99;    // Prescaler gives 1MHz
+    TIM3->ARR = 16666; // Auto-reload at 59.9988 Hz
+    TIM3->EGR = TIM_EGR_UG;
+    TIM3->SR = 0;
+    TIM3->DIER |= TIM_DIER_UIE;
+    NVIC_EnableIRQ(TIM3_IRQn);
+
+    TIM3->CR1 |= TIM_CR1_CEN; // Enable counter
+}
+
+void TIM3_IRQHandler(void)
+{
+    if (TIM3->SR & TIM_SR_UIF) {
+        TIM3->SR = ~TIM_SR_UIF; // Clear flag
+        tick60++;
+    }
+}
+
 // Initialize UART
 static void uart_init(void)
 {
@@ -576,6 +601,7 @@ int main(void)
 {
     clock_init_100mhz();
 
+    timer60_init();
     SysTick_Config(SystemCoreClock / 1000U);
 
     btn_init();
@@ -593,18 +619,21 @@ int main(void)
 
     start_rom(0);
 
+    static uint32_t last_tick60;
     uint32_t last_ms = ms_ticks;
     uint32_t cpu_acc = 0;
-    uint32_t timer_acc = 0;
 
     uint32_t start = ms_ticks;
     bool reported = false;
 
     while (1) {
+        while (last_tick60 != tick60) {
+            last_tick60++;
+            chip8_tick_timers(&chip);
+        }
         while (ms_ticks != last_ms) { // One millisecond has passed
             last_ms++;
             cpu_acc += 700;
-            timer_acc += 60;
             while (cpu_acc >= 1000) {
                 Chip8Status s = chip8_step(&chip);
                 if (s != CHIP8_OK) {
@@ -613,10 +642,6 @@ int main(void)
                     } // Crash until reset
                 }
                 cpu_acc -= 1000;
-            }
-            while (timer_acc >= 1000) {
-                chip8_tick_timers(&chip);
-                timer_acc -= 1000;
             }
             if (!reported && chip.display[0]) {
                 reported = true;
