@@ -17,7 +17,7 @@ LDFLAGS = $(CPU) -T$(TOP_DIR)/linker/STM32F411VETX_FLASH.ld -Wl,-Map=$(TARGET).m
           -Wl,--gc-sections --specs=nano.specs --specs=nosys.specs
 
 SRCS = src/main.c src/roms_builtin.c $(TOP_DIR)/vendor/cmsis_device_f4/Source/Templates/system_stm32f4xx.c
-CORE_SRCS = $(CORE_DIR)/chip8.c
+CORE_SRCS = $(CORE_DIR)/chip8.c $(CORE_DIR)/keypad.c
 ASMS = $(TOP_DIR)/vendor/cmsis_device_f4/Source/Templates/gcc/startup_stm32f411xe.s
 # Maps TOP_DIR to vendor/ so that it builds on build/vendor and build/src
 OBJS_C = $(patsubst $(TOP_DIR)/%, build/%, $(filter $(TOP_DIR)/%, $(SRCS))) \

@@ -4,6 +4,7 @@
 #include "stm32f411xe.h"
 #include "stm32f4xx.h"
 #include "../../Chip-8/core/chip8.h"
+#include "../../Chip-8/core/keypad.h"
 #include "roms.h"
 
 #define UART_TX_PIN 2 // PA2
@@ -81,10 +82,80 @@ static int clock_init_100mhz(void)
     return 0;
 }
 
+// Tables to define Keypad pins
+typedef struct {
+    GPIO_TypeDef *port;
+    uint8_t pin;
+} kp_pin_t;
+static const kp_pin_t kp_rows[4] = {{GPIOE, 13}, {GPIOE, 11}, {GPIOE, 9}, {GPIOE, 7}};
+static const kp_pin_t kp_cols[4] = {{GPIOE, 14}, {GPIOE, 12}, {GPIOE, 10}, {GPIOE, 8}};
+
+// Functions to asign the pins using yhe defined pin tables
+static void gpio_input_pullup(GPIO_TypeDef *p, uint8_t pin)
+{
+    p->MODER &= ~(3U << (pin * 2U)); // Set pin as input
+    p->PUPDR &= ~(3U << (pin * 2U)); // Clear Pull-up and Pull-Down register
+    p->PUPDR |= (1U << (pin * 2U));  // Set as Pull-up
+}
+
+static void gpio_output_od(GPIO_TypeDef *p, uint8_t pin)
+{
+    p->BSRR = 1U << pin;             // Set pin high
+    p->OTYPER |= 1U << pin;          // Set as open-drain pin
+    p->MODER &= ~(3U << (pin * 2U)); // Clear mode
+    p->MODER |= (1U << (pin * 2U));  // Set as output
+}
+static Keypad kp;
+static uint8_t kp_row;
+static uint16_t kp_acc;
+static volatile uint16_t kp_mask;
+
+void kp_hw_init(void)
+{
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOEEN; // Clock on for GPIOE
+    (void)RCC->AHB1ENR;
+
+    for (int i = 0; i < 4; i++) {
+        gpio_output_od(kp_rows[i].port, kp_rows[i].pin);
+        gpio_input_pullup(kp_cols[i].port, kp_cols[i].pin);
+    }
+    keypad_init(&kp);
+    kp_row = 0;
+    kp_rows[0].port->BSRR = 1U << (kp_rows[0].pin + 16U); // Row 0 LOW
+}
+
+void kp_hw_tick(void)
+{
+    uint16_t cols = 0;
+    for (int c = 0; c < 4; c++) {
+        if (!(kp_cols[c].port->IDR & (1U << kp_cols[c].pin))) {
+            cols |= (uint16_t)(1U << c);
+        }
+    }
+    kp_acc |= (uint16_t)(cols << (kp_row * 4U));
+
+    kp_rows[kp_row].port->BSRR = 1U << kp_rows[kp_row].pin; // Release
+    kp_row = (uint8_t)((kp_row + 1U) & 3U);
+    kp_rows[kp_row].port->BSRR = 1U << (kp_rows[kp_row].pin + 16U); // Next row LOW
+
+    if (kp_row == 0) {
+        if (keypad_update(&kp, kp_acc)) {
+            kp_mask = keypad_to_chip8(keypad_pressed(&kp));
+        }
+        kp_acc = 0;
+    }
+}
+
+uint16_t kp_hw_mask(void)
+{
+    return kp_mask;
+}
+
 volatile uint32_t ms_ticks;
 void SysTick_Handler(void)
 {
     ms_ticks++;
+    kp_hw_tick();
 }
 
 static void delay_ms(uint32_t ms)
@@ -602,6 +673,7 @@ int main(void)
     clock_init_100mhz();
 
     timer60_init();
+    kp_hw_init();
     SysTick_Config(SystemCoreClock / 1000U);
 
     btn_init();
@@ -668,6 +740,16 @@ int main(void)
                 printf("Time to render: %lu ms\n", (unsigned long)(ms_ticks - last_render));
                 last_render = ms_ticks;
             }
+        }
+
+        static uint16_t applied;
+        uint16_t m = kp_hw_mask();
+        if (m != applied) {
+            for (uint8_t k = 0; k < 16; k++) {
+                chip8_set_key(&chip, k, (m >> k) & 1U);
+            }
+            applied = m;
+            printf("Pressed: 0x%x\n", m);
         }
     }
 }

@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "../core/chip8.h"
+#include "../core/keypad.h"
 
 #ifdef NDEBUG
 #error "Tests must be built without NDEBUG, or assert() does nothing"
@@ -818,6 +819,104 @@ static void test_dirty_not_set_on_failed_opcode(void)
     assert(c.display_dirty == false);
 }
 
+static void scan_n(Keypad *k, uint16_t m, int n)
+{
+    for (int i = 0; i < n; i++) {
+        keypad_update(k, m);
+    }
+}
+
+static void test_keypad_init(void)
+{
+    Keypad k;
+    keypad_init(&k);
+    assert(keypad_pressed(&k) == 0);
+    assert(keypad_update(&k, 0) == false);
+}
+
+static void test_keypad_needs_consecutive_scans(void)
+{
+    Keypad k;
+    keypad_init(&k);
+    for (int i = 0; i < KEYPAD_DEBOUNCE_SCANS - 1; i++) {
+        assert(keypad_update(&k, 0x0001) == false);
+        assert(keypad_pressed(&k) == 0);
+    }
+    assert(keypad_update(&k, 0x0001) == true);
+    assert(keypad_pressed(&k) == 0x0001);
+}
+
+static void test_keypad_change_reported_once(void)
+{
+    Keypad k;
+    keypad_init(&k);
+    scan_n(&k, 0x0004, KEYPAD_DEBOUNCE_SCANS);
+    assert(keypad_update(&k, 0x0004) == false);
+    assert(keypad_update(&k, 0x0004) == false);
+}
+
+static void test_keypad_ignores_glitch(void)
+{
+    Keypad k;
+    keypad_init(&k);
+    scan_n(&k, 0x0001, KEYPAD_DEBOUNCE_SCANS);
+    keypad_update(&k, 0x0000);
+    scan_n(&k, 0x0001, KEYPAD_DEBOUNCE_SCANS);
+    assert(keypad_pressed(&k) == 0x0001);
+}
+
+static void test_keypad_bounce_never_accepted(void)
+{
+    Keypad k;
+    keypad_init(&k);
+    for (int i = 0; i < 50; i++) {
+        keypad_update(&k, (i & 1) ? 0x0001 : 0x0000);
+    }
+    assert(keypad_pressed(&k) == 0);
+}
+
+static void test_keypad_release_debounced(void)
+{
+    Keypad k;
+    keypad_init(&k);
+    scan_n(&k, 0x0010, KEYPAD_DEBOUNCE_SCANS);
+    assert(keypad_pressed(&k) == 0x0010);
+    for (int i = 0; i < KEYPAD_DEBOUNCE_SCANS - 1; i++) {
+        keypad_update(&k, 0);
+        assert(keypad_pressed(&k) == 0x0010);
+    }
+    assert(keypad_update(&k, 0) == true);
+    assert(keypad_pressed(&k) == 0);
+}
+
+static void test_keypad_switch_between_keys(void)
+{
+    Keypad k;
+    keypad_init(&k);
+    scan_n(&k, 0x0001, KEYPAD_DEBOUNCE_SCANS);
+    scan_n(&k, 0x0002, KEYPAD_DEBOUNCE_SCANS);
+    assert(keypad_pressed(&k) == 0x0002);
+}
+
+static void test_keypad_multiple_keys(void)
+{
+    Keypad k;
+    keypad_init(&k);
+    scan_n(&k, 0x8001, KEYPAD_DEBOUNCE_SCANS);
+    assert(keypad_pressed(&k) == 0x8001);
+}
+
+static void test_keypad_mapping(void)
+{
+    assert(keypad_to_chip8(0x0000) == 0);
+    assert(keypad_to_chip8(1U << 0) == (1U << 0x1));
+    assert(keypad_to_chip8(1U << 3) == (1U << 0xC));
+    assert(keypad_to_chip8(1U << 12) == (1U << 0xA));
+    assert(keypad_to_chip8(1U << 13) == (1U << 0x0));
+    assert(keypad_to_chip8(1U << 15) == (1U << 0xF));
+    assert(keypad_to_chip8(0xFFFF) == 0xFFFF);
+}
+
 int main(void)
 {
     test_init_state();
@@ -886,6 +985,16 @@ int main(void)
     test_dirty_not_set_by_keys_or_timers();
     test_dirty_not_cleared_by_step_or_tick();
     test_dirty_not_set_on_failed_opcode();
+
+    test_keypad_init();
+    test_keypad_needs_consecutive_scans();
+    test_keypad_change_reported_once();
+    test_keypad_ignores_glitch();
+    test_keypad_bounce_never_accepted();
+    test_keypad_release_debounced();
+    test_keypad_switch_between_keys();
+    test_keypad_multiple_keys();
+    test_keypad_mapping();
 
     puts("Success. All tests passed!");
     return 0;
