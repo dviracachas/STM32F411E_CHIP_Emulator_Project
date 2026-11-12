@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include "stm32f411xe.h"
 #include "stm32f4xx.h"
 #include "../../Chip-8/core/chip8.h"
@@ -38,6 +39,7 @@
 #define OFFSET_Y ((DISP_H - CHIP8_DISP_H * SCALE) / 2)
 #define FG RGB565(0x33, 0xFF, 0x66)
 #define BG COLOR_BLACK
+#define STRIP_BYTES (CHIP8_DISP_W * SCALE * 2 * SCALE)
 
 // Definitions for UART
 #define PCLK1_HZ 50000000U
@@ -215,11 +217,67 @@ static void spi1_init(void)
     SPI1->CR1 |= SPI_CR1_MSTR;                  // Set as master
     SPI1->CR1 |= SPI_CR1_SSM;                   // Software slave management
     SPI1->CR1 |= SPI_CR1_SSI;                   // Internal slave select (Master mode)
-    SPI1->CR1 |= 1U << SPI_CR1_BR_Pos;          // Set baud rate bits to 001 (Fclk/4)
+    SPI1->CR1 &= ~(7U << SPI_CR1_DFF_Pos);      // Set baud rate bits to 000 (Fclk/2)
     SPI1->CR1 &= ~(1U << SPI_CR1_DFF_Pos);      // Set Data frame bit to 0 (8 bits)
     SPI1->CR1 &= ~(1U << SPI_CR1_LSBFIRST_Pos); // Set LSB bit to 0 (Most significant bit first)
 
     SPI1->CR1 |= SPI_CR1_SPE; // SPI Enable
+}
+
+// Initialize DMA2 for use with SPI1
+static uint8_t strips[2][STRIP_BYTES];
+static uint8_t snap[CHIP8_DISP_W * CHIP8_DISP_H];
+static volatile bool dma_done;
+
+static struct {
+    bool busy;
+    bool pending;  // Built strip is waiting for the DMA
+    uint8_t cur;   // Buffer currently (or last) sent
+    uint8_t built; // Number of CHIP-8 rows built so far
+} rs;
+
+static void dma2_init(void)
+{
+    RCC->AHB1ENR |= RCC_AHB1ENR_DMA2EN;
+    (void)RCC->AHB1ENR;
+
+    DMA2_Stream3->CR = 0;
+    while (DMA2_Stream3->CR & DMA_SxCR_EN) {
+    }
+
+    DMA2_Stream3->CR |= (3U << DMA_SxCR_CHSEL_Pos); // Assign Channel 3
+    DMA2_Stream3->CR |= DMA_SxCR_DIR_0;             // Direction Memory-to-peripheral
+    DMA2_Stream3->CR |= DMA_SxCR_MINC;              // Increment memory address
+    DMA2_Stream3->CR |= DMA_SxCR_TCIE;              // Interrupt on transfer complete
+
+    SPI1->CR2 |= SPI_CR2_TXDMAEN; // SPI asks the DMA for data
+    NVIC_EnableIRQ(DMA2_Stream3_IRQn);
+}
+
+static void dma_start(const uint8_t *buf, uint16_t len)
+{
+    DMA2_Stream3->CR &= ~DMA_SxCR_EN;
+    while (DMA2_Stream3->CR & DMA_SxCR_EN) {
+    }
+
+    DMA2->LIFCR = DMA_LIFCR_CTCIF3 | DMA_LIFCR_CHTIF3 | DMA_LIFCR_CTEIF3 | DMA_LIFCR_CDMEIF3 |
+                  DMA_LIFCR_CFEIF3; // Clear stale flags
+
+    DMA2_Stream3->PAR = (uint32_t)&SPI1->DR;
+    DMA2_Stream3->M0AR = (uint32_t)buf;
+    DMA2_Stream3->NDTR = len;
+    DMA2_Stream3->CR |= DMA_SxCR_EN;
+}
+
+void DMA2_Stream3_IRQHandler(void)
+{
+    if (DMA2->LISR & DMA_LISR_TCIF3) {
+        DMA2->LIFCR = DMA_LIFCR_CTCIF3;
+        dma_done = true;
+    }
+    if (DMA2->LISR & DMA_LISR_TEIF3) { // Transfer error
+        DMA2->LIFCR = DMA_LIFCR_CTEIF3;
+    }
 }
 
 static void spi_write(uint8_t b)
@@ -372,6 +430,76 @@ void render(const Chip8 *c)
     DISP_CS_HIGH();
 }
 
+static void strip_build(uint8_t *dst, unsigned y)
+{
+    const uint8_t fg_hi = FG >> 8, fg_lo = FG & 0xFF;
+    const uint8_t bg_hi = BG >> 8, bg_lo = BG & 0xFF;
+    uint8_t *p = dst;
+
+    for (unsigned x = 0; x < CHIP8_DISP_W; x++) {
+        uint8_t hi = snap[x + y * CHIP8_DISP_W] ? fg_hi : bg_hi;
+        uint8_t lo = snap[x + y * CHIP8_DISP_W] ? fg_lo : bg_lo;
+        for (unsigned k = 0; k < SCALE; k++) {
+            *p++ = hi;
+            *p++ = lo;
+        }
+    }
+    for (unsigned r = 1; r < SCALE; r++) {
+        memcpy(dst + r * CHIP8_DISP_W * SCALE * 2, dst, CHIP8_DISP_W * SCALE * 2);
+    }
+}
+
+bool render_busy(void)
+{
+    return rs.busy;
+}
+
+bool render_start(Chip8 *c)
+{
+    if (rs.busy || !c->display_dirty)
+        return false;
+
+    c->display_dirty = false; // Clear before copying
+    memcpy(snap, c->display, sizeof snap);
+
+    disp_set_window(0, OFFSET_Y, DISP_W - 1, OFFSET_Y + CHIP8_DISP_H * SCALE - 1);
+    // Polled SPI is no longer used until the frame ends
+
+    rs.busy = true;
+    dma_done = false;
+    rs.cur = 0;
+    strip_build(strips[0], 0);
+    dma_start(strips[0], STRIP_BYTES); // Row 0 is sending
+    strip_build(strips[1], 1);         // Row 1 is built meanwhile
+    rs.built = 2;
+    rs.pending = true;
+    return true;
+}
+
+void render_poll(void)
+{
+    if (!rs.busy || !dma_done)
+        return;
+    dma_done = false;
+
+    if (rs.pending) {
+        rs.cur ^= 1;
+        dma_start(strips[rs.cur], STRIP_BYTES);
+        rs.pending = false;
+        if (rs.built < CHIP8_DISP_H) {
+            strip_build(strips[rs.cur ^ 1], rs.built++);
+            rs.pending = true;
+        }
+    } else { // The last strip is sent
+        while (!(SPI1->SR & SPI_SR_TXE)) {
+        }
+        while (SPI1->SR & SPI_SR_BSY) {
+        }
+        DISP_CS_HIGH();
+        rs.busy = false;
+    }
+}
+
 void disp_selftest()
 {
     disp_clear(COLOR_BLACK);
@@ -440,7 +568,7 @@ static void start_rom(size_t index)
     uart_puts(e->name);
     uart_puts("\r\n");
 
-    render(&chip);
+    render_start(&chip);
 }
 
 // Main loop
@@ -456,6 +584,7 @@ int main(void)
     uart_puts("\x1b[2J");
 
     spi1_init();
+    dma2_init();
 
     disp_rst();
     disp_init();
@@ -508,11 +637,12 @@ int main(void)
         }
         // print_display(&chip);
         static uint32_t last_render;
-        if (chip.display_dirty && (uint32_t)(ms_ticks - last_render) >= 33) {
-            last_render = ms_ticks;
-            render(&chip);
-            printf("Time to render: %lu ms\n", (unsigned long)(ms_ticks - last_render));
-            chip.display_dirty = false;
+        render_poll();
+        if (!render_busy() && chip.display_dirty && (uint32_t)(ms_ticks - last_render) >= 16) {
+            if (render_start(&chip)) {
+                printf("Time to render: %lu ms\n", (unsigned long)(ms_ticks - last_render));
+                last_render = ms_ticks;
+            }
         }
     }
 }
