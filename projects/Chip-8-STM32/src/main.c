@@ -3,8 +3,11 @@
 #include "stm32f411xe.h"
 #include "stm32f4xx.h"
 #include "../../Chip-8/core/chip8.h"
+#include "roms.h"
 
 #define UART_TX_PIN 2 // PA2
+
+#define BTN_PIN 0 // PA0
 
 // Pins for ILI9341 display
 #define DISP_RST_PIN 3  // PA3
@@ -41,40 +44,6 @@
 #define BAUD 115200U
 
 static Chip8 chip;
-
-static const uint8_t timer_rom[] = {
-    0x60, 0x3C, // 0x200: V0 = 60 (Hz)
-    0xF0, 0x15, // 0x202: delay_timer = V0
-    0xF1, 0x07, // 0x204: V1 = delay_timer
-    0x31, 0x00, // 0x206: skip next if V1 == 0
-    0x12, 0x04, // 0x208: Jump to 0x204 (Wait for delay)
-    0x62, 0x00, // 0x20A: V2 = 0
-    0x63, 0x00, // 0x20C: V3 = 0
-    0xA0, 0x91, // 0x20E: I = 0x91 (Font digit D)
-    0xD2, 0x35, // 0x210: Draw 5 rows at (V2, V3)
-    0x12, 0x12  // 0x212: Jump to itself (Repeat)
-};
-
-static const uint8_t ball_moving_rom[] = {
-    0x60, 0x00, // 0x200: V0 = 0
-    0x61, 0x0A, // 0x202: V1 = 10
-    0xA2, 0x20, /// 0x204: I = 0x220 (Ball sprite)
-    0xD0, 0x18, // 0x206: Draw 8 rows at (V0, V1)
-    0x62, 0x02, // 0x208: V2 = 2
-    0xF2, 0x15, // 0x20A: delay_timer = V2
-    0xF3, 0x07, // 0x20C: V3 = delay_timer
-    0x33, 0x00, // 0x20E: Skip next if V3 == 0
-    0x12, 0x0C, // 0x210: Jump to 20C (Wait for delay)
-    0xD0, 0x18, // 0x212: Erase (Draw again)
-    0x70, 0x01, // 0x214: V0 += 1
-    0x30, 0x40, // 0x216: Skip next if V0 == 64
-    0x12, 0x06, // 0x218: Jump to 206
-    0x60, 0x00, // 0x21A: V0 = 0 (Wrap around)
-    0x12, 0x06, // 0x21C: Jump to 206
-    0x00, 0x00, // 0x21E: Padding
-    // At 0x220
-    0x3C, 0x7E, 0xFF, 0xFF, 0xFF, 0xFF, 0x7E, 0x3C // Ball sprite
-};
 
 static int clock_init_100mhz(void)
 {
@@ -421,6 +390,59 @@ void disp_selftest()
     disp_fill_rect(200, 150, 50, 50, COLOR_BLACK);
 };
 
+static void btn_init(void)
+{
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN; // Clock on for GPIOA
+    (void)RCC->AHB1ENR;                  // Short settle delay
+
+    GPIOA->MODER &= ~(3U << (BTN_PIN * 2)); // Set BTN bits to 00 (Input)
+}
+
+typedef enum { BTN_NONE, BTN_SHORT, BTN_LONG } btn_event_t;
+
+static btn_event_t button_poll(void) // Call once per ms
+{
+    static uint16_t held;
+    static bool long_sent;
+    bool down = GPIOA->IDR & 1U;
+
+    if (down) {
+        if (held < 0xFFFF)
+            held++;
+        if (held == 500 && !long_sent) {
+            long_sent = true;
+            return BTN_LONG;
+        }
+    } else {
+        btn_event_t e = (held >= 30 && held < 500) ? BTN_SHORT : BTN_NONE;
+        held = 0;
+        long_sent = false;
+        return e;
+    }
+    return BTN_NONE;
+}
+
+static size_t rom_index;
+
+static void start_rom(size_t index)
+{
+    const rom_entry_t *e = rom_get(index);
+    if (e == NULL) {
+        return;
+    }
+
+    chip8_init(&chip);
+    if (chip8_load_rom(&chip, e->data, e->len) != CHIP8_OK) {
+        uart_puts("ROM load failed\r\n");
+        return;
+    }
+    uart_puts("Running: ");
+    uart_puts(e->name);
+    uart_puts("\r\n");
+
+    render(&chip);
+}
+
 // Main loop
 int main(void)
 {
@@ -428,8 +450,7 @@ int main(void)
 
     SysTick_Config(SystemCoreClock / 1000U);
 
-    chip8_init(&chip);
-    chip8_load_rom(&chip, ball_moving_rom, sizeof(ball_moving_rom));
+    btn_init();
 
     uart_init();
     uart_puts("\x1b[2J");
@@ -440,6 +461,8 @@ int main(void)
     disp_init();
     disp_clear(COLOR_BLACK);
     // disp_selftest();
+
+    start_rom(0);
 
     uint32_t last_ms = ms_ticks;
     uint32_t cpu_acc = 0;
@@ -469,6 +492,18 @@ int main(void)
             if (!reported && chip.display[0]) {
                 reported = true;
                 printf("Time elapsed: %lu ms\n", (unsigned long)(ms_ticks - start));
+            }
+            switch (button_poll()) {
+            case BTN_SHORT:
+                rom_index = (rom_index + 1) % rom_count();
+                uart_puts(rom_get(rom_index)->name);
+                uart_puts("\r\n");
+                break;
+            case BTN_LONG:
+                start_rom(rom_index);
+                break;
+            default:
+                break;
             }
         }
         // print_display(&chip);
