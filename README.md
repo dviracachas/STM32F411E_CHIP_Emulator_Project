@@ -7,11 +7,24 @@
 For-fun project to learn how to use the STM32F411E-Discovery board by making a CHIP-8 emulator, using CMSIS and direct compilation only.
 
 # 🕹️ Game Demos
-<div style="display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;">
-  <img src="readme_files/breakout.gif" style="flex-grow: 1; min-width: 220px; width: 0; max-width: 32%; object-fit: cover;" alt="Image 1">
-  <img src="readme_files/tetris.gif" style="flex-grow: 1; min-width: 220px; width: 0; max-width: 32%; object-fit: cover;" alt="Image 2">
-  <img src="readme_files/space_invaders.gif" style="flex-grow: 1; min-width: 220px; width: 0; max-width: 32%; object-fit: cover;" alt="Image 3">
-</div>
+<table>
+  <tr>
+    <td rowspan="3" width="40%" align="center">
+      <img src="readme_files/hw_demo.gif" alt="Portrait Image 4" width="100%">
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="readme_files/tetris.gif" alt="Image 2" width="100%">
+    </td>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="readme_files/space_invaders.gif" alt="Image 3" width="100%">
+    </td>
+  </tr>
+</table>
+
 
 # 🗺️ Roadmap
 Current tasks and progress are reported in the related [GitHub Project](https://github.com/users/dviracachas/projects/3).
